@@ -101,3 +101,6 @@ gcp-key.json
 .cache/
 tmp/
 temp/
+
+# ─── Tool caches ───────────────────────────────────
+.opencode/
