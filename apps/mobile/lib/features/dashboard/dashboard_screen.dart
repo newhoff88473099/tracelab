@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../samples/sample_registration_screen.dart';
 import '../scanner/scanner_screen.dart';
 import '../samples/sample_status_screen.dart';
+import '../samples/sample_list_screen.dart';
+import '../camera/photo_capture_screen.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -35,16 +37,18 @@ class DashboardScreen extends ConsumerWidget {
             _DashboardCard(
               icon: Icons.photo_camera,
               label: 'Photo',
-              onTap: () {
-                // TODO: Photo capture screen
-              },
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const PhotoCaptureScreen()),
+              ),
             ),
             _DashboardCard(
               icon: Icons.list_alt,
               label: 'Samples',
-              onTap: () {
-                // TODO: Sample list
-              },
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SampleListScreen()),
+              ),
             ),
           ],
         ),

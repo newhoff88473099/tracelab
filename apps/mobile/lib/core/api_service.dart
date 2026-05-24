@@ -29,4 +29,12 @@ class ApiService {
     final response = await _dio.get('/samples');
     return response.data;
   }
+
+  Future<Map<String, dynamic>> updateSampleStatus(
+      String id, String status) async {
+    final response = await _dio.post('/samples/$id/status', data: {
+      'status': status,
+    });
+    return response.data;
+  }
 }

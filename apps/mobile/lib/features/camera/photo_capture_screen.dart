@@ -20,6 +20,24 @@ class _PhotoCaptureScreenState extends ConsumerState<PhotoCaptureScreen> {
     }
   }
 
+  Future<void> _uploadImage() async {
+    if (_image == null) return;
+    try {
+      // TODO: Implement upload using ApiService
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Photo captured successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed: ${e.toString()}')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -27,23 +45,30 @@ class _PhotoCaptureScreenState extends ConsumerState<PhotoCaptureScreen> {
       body: Column(
         children: [
           if (_image != null)
-            Image.network(_image!.path)
+            Image.network(_image!.path, height: 300, fit: BoxFit.cover)
           else
-            const Center(child: Text('No image selected')),
+            const SizedBox(height: 300),
           const SizedBox(height: 20),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               IconButton(
-                icon: const Icon(Icons.camera),
+                icon: const Icon(Icons.camera, size: 32),
                 onPressed: () => _pickImage(ImageSource.camera),
               ),
+              const SizedBox(width: 20),
               IconButton(
-                icon: const Icon(Icons.photo_library),
+                icon: const Icon(Icons.photo_library, size: 32),
                 onPressed: () => _pickImage(ImageSource.gallery),
               ),
             ],
           ),
+          const SizedBox(height: 20),
+          if (_image != null)
+            ElevatedButton(
+              onPressed: _uploadImage,
+              child: const Text('Upload Photo'),
+            ),
         ],
       ),
     );
