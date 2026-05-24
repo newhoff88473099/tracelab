@@ -30,7 +30,7 @@ export class AnalysesService {
       where: { id },
       include: { sample: true },
     });
-    if (!analysis || analysis.sample.laboratoryId !== laboratoryId) {
+    if (!analysis || !analysis.sample || analysis.sample.laboratoryId !== laboratoryId) {
       throw new NotFoundException('Analysis not found');
     }
     return analysis;
@@ -41,7 +41,7 @@ export class AnalysesService {
       where: { id },
       include: { sample: true },
     });
-    if (!analysis || analysis.sample.laboratoryId !== laboratoryId) {
+    if (!analysis || !analysis.sample || analysis.sample.laboratoryId !== laboratoryId) {
       throw new NotFoundException('Analysis not found');
     }
     return this.prisma.analysis.update({ where: { id }, data: dto });
@@ -52,7 +52,7 @@ export class AnalysesService {
       where: { id },
       include: { sample: true },
     });
-    if (!analysis || analysis.sample.laboratoryId !== laboratoryId) {
+    if (!analysis || !analysis.sample || analysis.sample.laboratoryId !== laboratoryId) {
       throw new NotFoundException('Analysis not found');
     }
     return this.prisma.analysis.update({

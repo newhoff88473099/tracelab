@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, UseGuards, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { LaboratoriesService } from './laboratories.service';
 import { CreateLaboratoryDto } from './dto/create-laboratory.dto';
@@ -24,10 +24,10 @@ export class LaboratoriesController {
 
   @Get()
   @Roles(UserRole.admin, UserRole.lab_manager)
-  @ApiOperation({ summary: 'List all laboratories' })
+  @ApiOperation({ summary: 'List laboratories' })
   @ApiResponse({ status: 200, description: 'Array of laboratories' })
-  findAll() {
-    return this.laboratoriesService.findAll();
+  findAll(@Req() req: { user: { laboratoryId: string } }) {
+    return this.laboratoriesService.findAll(req.user.laboratoryId);
   }
 
   @Get(':id')

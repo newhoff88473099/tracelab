@@ -1,9 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsUUID, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 
 export class RegisterRequestDto {
   @ApiProperty({ example: 'João Silva' })
+  @IsString()
   @IsNotEmpty()
   name: string;
 

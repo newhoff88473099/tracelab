@@ -6,6 +6,12 @@ import { RegisterRequestDto } from './dto/register-request.dto';
 import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
+interface JwtPayload {
+  sub: string;
+  role: string;
+  laboratoryId: string;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -56,8 +62,12 @@ export class AuthService {
 
   async refresh(refreshToken: string) {
     try {
-      const payload = await this.jwtService.verifyAsync(refreshToken, {
-        secret: process.env.JWT_REFRESH_SECRET || 'change_me_in_production_refresh_secret_min_32_chars',
+      const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET;
+      if (!jwtRefreshSecret) {
+        throw new Error('JWT_REFRESH_SECRET must be configured');
+      }
+      const payload = await this.jwtService.verifyAsync<JwtPayload>(refreshToken, {
+        secret: jwtRefreshSecret,
       });
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
@@ -72,14 +82,19 @@ export class AuthService {
   }
 
   private async generateTokens(userId: string, role: string, laboratoryId: string) {
+    const jwtSecret = process.env.JWT_SECRET;
+    const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET;
+    if (!jwtSecret || !jwtRefreshSecret) {
+      throw new Error('JWT secrets must be configured in environment variables');
+    }
     const payload = { sub: userId, role, laboratoryId };
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
-        secret: process.env.JWT_SECRET || 'change_me_in_production_jwt_secret_min_32_chars',
+        secret: jwtSecret,
         expiresIn: '15m',
       }),
       this.jwtService.signAsync(payload, {
-        secret: process.env.JWT_REFRESH_SECRET || 'change_me_in_production_refresh_secret_min_32_chars',
+        secret: jwtRefreshSecret,
         expiresIn: '7d',
       }),
     ]);

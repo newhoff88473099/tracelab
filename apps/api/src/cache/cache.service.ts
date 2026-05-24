@@ -11,7 +11,12 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
 
   async get<T>(key: string): Promise<T | null> {
     const data = await this.redisClient.get(key);
-    return data ? (JSON.parse(data) as T) : null;
+    if (!data) return null;
+    try {
+      return JSON.parse(data) as T;
+    } catch {
+      return null;
+    }
   }
 
   async set(key: string, value: any, ttlSeconds: number = 3600): Promise<void> {

@@ -13,15 +13,26 @@ export class StorageService {
   private bucket: string;
 
   constructor() {
+    const endpoint = process.env.CLOUDFLARE_R2_ENDPOINT;
+    const accessKeyId = process.env.CLOUDFLARE_R2_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY;
+    const bucket = process.env.CLOUDFLARE_R2_BUCKET;
+
+    if (!endpoint || !accessKeyId || !secretAccessKey || !bucket) {
+      throw new Error(
+        'Cloudflare R2 configuration missing: CLOUDFLARE_R2_ENDPOINT, CLOUDFLARE_R2_ACCESS_KEY_ID, CLOUDFLARE_R2_SECRET_ACCESS_KEY, and CLOUDFLARE_R2_BUCKET must be set',
+      );
+    }
+
     this.s3Client = new S3Client({
       region: 'auto',
-      endpoint: process.env.CLOUDFLARE_R2_ENDPOINT,
+      endpoint,
       credentials: {
-        accessKeyId: process.env.CLOUDFLARE_R2_ACCESS_KEY_ID || '',
-        secretAccessKey: process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY || '',
+        accessKeyId,
+        secretAccessKey,
       },
     });
-    this.bucket = process.env.CLOUDFLARE_R2_BUCKET || '';
+    this.bucket = bucket;
   }
 
   async uploadFile(file: MulterFile, key: string): Promise<string> {

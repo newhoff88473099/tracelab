@@ -17,8 +17,9 @@ export class LaboratoriesService {
     return this.prisma.laboratory.create({ data: dto });
   }
 
-  async findAll() {
+  async findAll(laboratoryId?: string) {
     return this.prisma.laboratory.findMany({
+      where: laboratoryId ? { id: laboratoryId } : undefined,
       select: {
         id: true,
         name: true,
