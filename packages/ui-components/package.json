@@ -1,0 +1,17 @@
+{
+  "name": "@tracelab/ui-components",
+  "version": "0.0.1",
+  "description": "Shared React UI components for TraceLab Dashboard",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

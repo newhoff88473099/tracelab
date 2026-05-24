@@ -1,0 +1,19 @@
+{
+  "name": "@tracelab/shared-types",
+  "version": "0.0.1",
+  "description": "Shared TypeScript types between TraceLab API and Dashboard",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint src/",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

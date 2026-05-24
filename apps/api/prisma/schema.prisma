@@ -1,0 +1,216 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  admin
+  lab_manager
+  analyst
+  viewer
+}
+
+enum SampleStatus {
+  received
+  in_analysis
+  pending_review
+  approved
+  rejected
+  archived
+}
+
+enum AnalysisStatus {
+  draft
+  completed
+  validated
+}
+
+enum NotificationChannel {
+  whatsapp
+  email
+  push
+}
+
+enum NotificationStatus {
+  queued
+  sent
+  failed
+}
+
+enum ReportFormat {
+  pdf
+  xlsx
+}
+
+model Laboratory {
+  id            String         @id @default(uuid()) @db.Uuid
+  name          String
+  cnpj          String?        @unique
+  address       Json?
+  contact       Json?
+  settings      Json?
+  createdAt     DateTime       @default(now()) @map("created_at")
+  users         User[]
+  clients       Client[]
+  products      Product[]
+  samples       Sample[]
+  reports       Report[]
+  notifications Notification[]
+
+  @@map("laboratories")
+}
+
+model User {
+  id             String         @id @default(uuid()) @db.Uuid
+  laboratoryId   String         @map("laboratory_id") @db.Uuid
+  name           String
+  email          String         @unique
+  passwordHash   String         @map("password_hash")
+  role           UserRole       @default(viewer)
+  isActive       Boolean        @default(true) @map("is_active")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  laboratory     Laboratory     @relation(fields: [laboratoryId], references: [id], onDelete: Cascade)
+  collectedSamples Sample[]     @relation("CollectedBy")
+  analyses       Analysis[]
+  images         Image[]
+  generatedReports Report[]     @relation("GeneratedBy")
+  notifications  Notification[] @relation("Recipient")
+  auditLogs      AuditLog[]
+
+  @@map("users")
+}
+
+model Client {
+  id           String     @id @default(uuid()) @db.Uuid
+  laboratoryId String     @map("laboratory_id") @db.Uuid
+  name         String
+  document     String?
+  contact      Json?
+  metadata     Json?
+  createdAt    DateTime   @default(now()) @map("created_at")
+  laboratory   Laboratory @relation(fields: [laboratoryId], references: [id], onDelete: Cascade)
+  samples      Sample[]
+
+  @@map("clients")
+}
+
+model Product {
+  id           String     @id @default(uuid()) @db.Uuid
+  laboratoryId String     @map("laboratory_id") @db.Uuid
+  name         String
+  sku          String?
+  barcode      String?
+  qrcode       String?
+  category     String?
+  aiTags       Json?      @map("ai_tags")
+  images       Json?
+  createdAt    DateTime   @default(now()) @map("created_at")
+  laboratory   Laboratory @relation(fields: [laboratoryId], references: [id], onDelete: Cascade)
+  samples      Sample[]
+
+  @@map("products")
+}
+
+model Sample {
+  id           String        @id @default(uuid()) @db.Uuid
+  laboratoryId String        @map("laboratory_id") @db.Uuid
+  clientId     String        @map("client_id") @db.Uuid
+  productId    String?       @map("product_id") @db.Uuid
+  collectedById String?      @map("collected_by") @db.Uuid
+  code         String        @unique
+  status       SampleStatus  @default(received)
+  receivedAt   DateTime      @default(now()) @map("received_at")
+  metadata     Json?
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  laboratory   Laboratory    @relation(fields: [laboratoryId], references: [id], onDelete: Cascade)
+  client       Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  product      Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  collector    User?         @relation("CollectedBy", fields: [collectedById], references: [id], onDelete: SetNull)
+  analyses     Analysis[]
+  reports      Report[]
+
+  @@map("samples")
+}
+
+model Analysis {
+  id          String         @id @default(uuid()) @db.Uuid
+  sampleId    String         @map("sample_id") @db.Uuid
+  analystId   String         @map("analyst_id") @db.Uuid
+  type        String
+  result      Json?
+  status      AnalysisStatus @default(draft)
+  startedAt   DateTime?      @map("started_at")
+  completedAt DateTime?      @map("completed_at")
+  notes       String?
+  sample      Sample         @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  analyst     User           @relation(fields: [analystId], references: [id], onDelete: Cascade)
+
+  @@map("analyses")
+}
+
+model Image {
+  id          String     @id @default(uuid()) @db.Uuid
+  entityType  String     @map("entity_type")
+  entityId    String     @map("entity_id") @db.Uuid
+  url         String
+  storageKey  String     @map("storage_key")
+  ocrData     Json?      @map("ocr_data")
+  aiLabels    Json?      @map("ai_labels")
+  uploadedById String     @map("uploaded_by") @db.Uuid
+  createdAt   DateTime   @default(now()) @map("created_at")
+  uploader    User       @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId])
+  @@map("images")
+}
+
+model Report {
+  id           String       @id @default(uuid()) @db.Uuid
+  laboratoryId String       @map("laboratory_id") @db.Uuid
+  sampleId     String       @map("sample_id") @db.Uuid
+  generatedById String      @map("generated_by") @db.Uuid
+  format       ReportFormat
+  fileUrl      String       @map("file_url")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  laboratory   Laboratory   @relation(fields: [laboratoryId], references: [id], onDelete: Cascade)
+  sample       Sample       @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+  generator    User         @relation("GeneratedBy", fields: [generatedById], references: [id], onDelete: Cascade)
+
+  @@map("reports")
+}
+
+model Notification {
+  id           String              @id @default(uuid()) @db.Uuid
+  laboratoryId String              @map("laboratory_id") @db.Uuid
+  recipientId  String              @map("recipient_id") @db.Uuid
+  channel      NotificationChannel
+  template     String
+  payload      Json?
+  status       NotificationStatus  @default(queued)
+  sentAt       DateTime?           @map("sent_at")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  laboratory   Laboratory          @relation(fields: [laboratoryId], references: [id], onDelete: Cascade)
+  recipient    User                @relation("Recipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id") @db.Uuid
+  changes     Json?
+  ipAddress   String?  @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@map("audit_logs")
+}

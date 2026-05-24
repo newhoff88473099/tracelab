@@ -1,0 +1,16 @@
+fastapi==0.111.0
+uvicorn[standard]==0.30.0
+pydantic==2.7.1
+pydantic-settings==2.3.0
+python-multipart==0.0.9
+httpx==0.27.0
+google-cloud-vision==3.7.2
+boto3==1.34.0          # Cloudflare R2 via S3-compatible API
+pillow==10.3.0
+numpy==1.26.4
+torch==2.3.0
+torchvision==0.18.0
+transformers==4.41.0   # CLIP model
+pytest==8.2.0
+pytest-asyncio==0.23.7
+ruff==0.4.7

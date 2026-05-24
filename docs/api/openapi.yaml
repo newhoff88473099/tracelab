@@ -1,0 +1,1550 @@
+openapi: 3.0.3
+
+info:
+  title: TraceLab AI API
+  description: |
+    REST API for TraceLab AI — intelligent quality control laboratory platform.
+    
+    ## Authentication
+    Most endpoints require a valid JWT access token in the `Authorization` header:
+    ```
+    Authorization: Bearer <access_token>
+    ```
+    Access tokens expire in **15 minutes**. Use `/auth/refresh` with the refresh token to get a new one.
+    
+    ## Roles
+    | Role | Access Level |
+    |---|---|
+    | `admin` | Full access to all resources and settings |
+    | `lab_manager` | Manage samples, analyses, clients, products, users (except admin) |
+    | `analyst` | Create/update analyses and samples; read-only on other resources |
+    | `viewer` | Read-only access to all resources |
+    
+    ## Pagination
+    List endpoints accept `page` (default: 1) and `limit` (default: 20, max: 100) query params and return a `PaginatedResponse`.
+    
+    ## Error Format
+    All errors return a consistent JSON envelope:
+    ```json
+    { "statusCode": 404, "error": "Not Found", "message": "Sample not found" }
+    ```
+  version: 1.0.0
+  contact:
+    name: TraceLab AI Engineering
+    email: dev@tracelab.app
+
+servers:
+  - url: http://localhost/api
+    description: Local development (via NGINX proxy)
+  - url: https://api.tracelab.app
+    description: Production
+
+  # AI microservice — separate server entry
+  - url: http://localhost/ai
+    description: AI service — local (via NGINX proxy)
+  - url: https://ai.tracelab.app
+    description: AI service — production
+
+tags:
+  - name: Auth
+    description: Authentication and token management
+  - name: Users
+    description: User management and role assignment
+  - name: Laboratories
+    description: Laboratory CRUD and settings
+  - name: Clients
+    description: Client management
+  - name: Products
+    description: Product catalog and scanner lookup
+  - name: Samples
+    description: Sample registration, workflow engine, and history
+  - name: Analyses
+    description: Analysis entry and validation
+  - name: Images
+    description: File upload, OCR, and AI identification
+  - name: Reports
+    description: PDF/Excel report generation and download
+  - name: Notifications
+    description: WhatsApp, email, and push notifications
+  - name: AI
+    description: FastAPI AI microservice endpoints
+
+# ─── Security Scheme ─────────────────────────────
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  # ─── Reusable Schemas ──────────────────────────
+  schemas:
+
+    # ── Enums ──────────────────────────────────────
+    UserRole:
+      type: string
+      enum: [admin, lab_manager, analyst, viewer]
+
+    SampleStatus:
+      type: string
+      enum: [received, in_analysis, pending_review, approved, rejected, archived]
+
+    AnalysisStatus:
+      type: string
+      enum: [draft, completed, validated]
+
+    NotificationChannel:
+      type: string
+      enum: [whatsapp, email, push]
+
+    NotificationStatus:
+      type: string
+      enum: [queued, sent, failed]
+
+    ReportFormat:
+      type: string
+      enum: [pdf, xlsx]
+
+    # ── Error ───────────────────────────────────────
+    ApiError:
+      type: object
+      required: [statusCode, error, message]
+      properties:
+        statusCode: { type: integer, example: 404 }
+        error:      { type: string,  example: 'Not Found' }
+        message:    { type: string,  example: 'Sample not found' }
+
+    # ── Pagination ──────────────────────────────────
+    PaginationMeta:
+      type: object
+      properties:
+        total:      { type: integer, example: 150 }
+        page:       { type: integer, example: 1 }
+        limit:      { type: integer, example: 20 }
+        totalPages: { type: integer, example: 8 }
+
+    # ── Auth ────────────────────────────────────────
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:    { type: string, format: email, example: 'analyst@tracelab.app' }
+        password: { type: string, minLength: 8, example: 'P@ssword1' }
+
+    AuthTokens:
+      type: object
+      properties:
+        accessToken:  { type: string }
+        refreshToken: { type: string }
+        expiresIn:    { type: integer, example: 900, description: 'Seconds until access token expires' }
+
+    RegisterRequest:
+      type: object
+      required: [name, email, password, laboratoryId]
+      properties:
+        name:         { type: string, example: 'João Silva' }
+        email:        { type: string, format: email }
+        password:     { type: string, minLength: 8 }
+        laboratoryId: { type: string, format: uuid }
+        role:
+          $ref: '#/components/schemas/UserRole'
+
+    # ── User ────────────────────────────────────────
+    User:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        name:         { type: string }
+        email:        { type: string, format: email }
+        role:
+          $ref: '#/components/schemas/UserRole'
+        laboratoryId: { type: string, format: uuid }
+        isActive:     { type: boolean }
+        createdAt:    { type: string, format: date-time }
+        updatedAt:    { type: string, format: date-time }
+
+    CreateUserDto:
+      type: object
+      required: [name, email, password, role]
+      properties:
+        name:     { type: string, example: 'Maria Costa' }
+        email:    { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        role:
+          $ref: '#/components/schemas/UserRole'
+
+    UpdateUserDto:
+      type: object
+      properties:
+        name:     { type: string }
+        role:
+          $ref: '#/components/schemas/UserRole'
+        isActive: { type: boolean }
+
+    # ── Laboratory ──────────────────────────────────
+    Laboratory:
+      type: object
+      properties:
+        id:        { type: string, format: uuid }
+        name:      { type: string }
+        cnpj:      { type: string, example: '00.000.000/0001-00' }
+        address:   { type: object }
+        contact:   { type: object }
+        settings:  { type: object }
+        createdAt: { type: string, format: date-time }
+
+    CreateLaboratoryDto:
+      type: object
+      required: [name]
+      properties:
+        name:    { type: string }
+        cnpj:    { type: string }
+        address: { type: object }
+        contact: { type: object }
+
+    # ── Client ──────────────────────────────────────
+    Client:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        laboratoryId: { type: string, format: uuid }
+        name:         { type: string }
+        document:     { type: string, example: '000.000.000-00' }
+        contact:      { type: object }
+        metadata:     { type: object }
+        createdAt:    { type: string, format: date-time }
+
+    CreateClientDto:
+      type: object
+      required: [name]
+      properties:
+        name:     { type: string }
+        document: { type: string }
+        contact:  { type: object }
+        metadata: { type: object }
+
+    # ── Product ─────────────────────────────────────
+    Product:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        laboratoryId: { type: string, format: uuid }
+        name:         { type: string }
+        sku:          { type: string }
+        barcode:      { type: string }
+        qrcode:       { type: string }
+        category:     { type: string }
+        aiTags:       { type: object }
+        images:       { type: array, items: { type: string } }
+        createdAt:    { type: string, format: date-time }
+
+    CreateProductDto:
+      type: object
+      required: [name]
+      properties:
+        name:     { type: string }
+        sku:      { type: string }
+        barcode:  { type: string }
+        qrcode:   { type: string }
+        category: { type: string }
+
+    ScanRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, example: '7891234567890', description: 'QR code or barcode value' }
+
+    # ── Sample ──────────────────────────────────────
+    Sample:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        laboratoryId: { type: string, format: uuid }
+        clientId:     { type: string, format: uuid }
+        productId:    { type: string, format: uuid, nullable: true }
+        code:         { type: string, example: 'TL-2026-00001' }
+        status:
+          $ref: '#/components/schemas/SampleStatus'
+        receivedAt:   { type: string, format: date-time }
+        collectedBy:  { type: string, format: uuid, nullable: true }
+        metadata:     { type: object }
+        createdAt:    { type: string, format: date-time }
+        updatedAt:    { type: string, format: date-time }
+
+    CreateSampleDto:
+      type: object
+      required: [clientId, code]
+      properties:
+        clientId:   { type: string, format: uuid }
+        productId:  { type: string, format: uuid }
+        code:       { type: string }
+        receivedAt: { type: string, format: date-time }
+        metadata:   { type: object }
+
+    UpdateSampleStatusDto:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/SampleStatus'
+        notes: { type: string }
+
+    SampleHistoryEntry:
+      type: object
+      properties:
+        id:         { type: string, format: uuid }
+        action:     { type: string }
+        changes:    { type: object }
+        userId:     { type: string, format: uuid }
+        userName:   { type: string }
+        createdAt:  { type: string, format: date-time }
+
+    # ── Analysis ────────────────────────────────────
+    Analysis:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        sampleId:    { type: string, format: uuid }
+        analystId:   { type: string, format: uuid }
+        type:        { type: string, example: 'visual_inspection' }
+        result:      { type: object }
+        status:
+          $ref: '#/components/schemas/AnalysisStatus'
+        startedAt:   { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+        notes:       { type: string, nullable: true }
+
+    CreateAnalysisDto:
+      type: object
+      required: [sampleId, type]
+      properties:
+        sampleId: { type: string, format: uuid }
+        type:     { type: string }
+        notes:    { type: string }
+
+    UpdateAnalysisDto:
+      type: object
+      properties:
+        result: { type: object }
+        status:
+          $ref: '#/components/schemas/AnalysisStatus'
+        notes:    { type: string }
+        completedAt: { type: string, format: date-time }
+
+    # ── Image ────────────────────────────────────────
+    Image:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        entityType:  { type: string, enum: [sample, product, analysis] }
+        entityId:    { type: string, format: uuid }
+        url:         { type: string, format: uri }
+        storageKey:  { type: string }
+        ocrData:     { type: object, nullable: true }
+        aiLabels:    { type: object, nullable: true }
+        uploadedBy:  { type: string, format: uuid }
+        createdAt:   { type: string, format: date-time }
+
+    UploadImageResponse:
+      type: object
+      properties:
+        image:      { $ref: '#/components/schemas/Image' }
+        uploadUrl:  { type: string, format: uri, description: 'Presigned R2 URL (if using direct upload)' }
+
+    OcrResult:
+      type: object
+      properties:
+        rawText:    { type: string }
+        confidence: { type: number, format: float, minimum: 0, maximum: 1 }
+        blocks:
+          type: array
+          items:
+            type: object
+            properties:
+              text:       { type: string }
+              confidence: { type: number }
+
+    AiIdentifyResult:
+      type: object
+      properties:
+        labels:
+          type: array
+          items: { type: string }
+        category:       { type: string, nullable: true }
+        confidence:     { type: number, format: float, minimum: 0, maximum: 1 }
+        autoSuggested:  { type: boolean, description: 'true if confidence > CONFIDENCE_THRESHOLD (0.85)' }
+        boundingBoxes:
+          type: array
+          items:
+            type: object
+            properties:
+              label:      { type: string }
+              confidence: { type: number }
+              x: { type: number }
+              y: { type: number }
+              width:  { type: number }
+              height: { type: number }
+
+    FaultDetectionResult:
+      type: object
+      properties:
+        hasFault:  { type: boolean }
+        faultType: { type: string, nullable: true }
+        confidence: { type: number, format: float }
+        regions:
+          type: array
+          items: { type: object }
+
+    # ── Report ───────────────────────────────────────
+    Report:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        laboratoryId: { type: string, format: uuid }
+        sampleId:    { type: string, format: uuid }
+        generatedBy: { type: string, format: uuid }
+        format:
+          $ref: '#/components/schemas/ReportFormat'
+        fileUrl:     { type: string, format: uri }
+        createdAt:   { type: string, format: date-time }
+
+    GenerateReportDto:
+      type: object
+      required: [sampleId, format]
+      properties:
+        sampleId: { type: string, format: uuid }
+        format:
+          $ref: '#/components/schemas/ReportFormat'
+
+    # ── Notification ────────────────────────────────
+    Notification:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        laboratoryId: { type: string, format: uuid }
+        recipientId:  { type: string, format: uuid }
+        channel:
+          $ref: '#/components/schemas/NotificationChannel'
+        template:     { type: string }
+        payload:      { type: object }
+        status:
+          $ref: '#/components/schemas/NotificationStatus'
+        sentAt:       { type: string, format: date-time, nullable: true }
+        createdAt:    { type: string, format: date-time }
+
+    SendNotificationDto:
+      type: object
+      required: [recipientId, channel, template, payload]
+      properties:
+        recipientId: { type: string, format: uuid }
+        channel:
+          $ref: '#/components/schemas/NotificationChannel'
+        template: { type: string, example: 'sample_received' }
+        payload:  { type: object }
+
+  # ─── Reusable Parameters ────────────────────────
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      schema: { type: integer, default: 1, minimum: 1 }
+    LimitParam:
+      name: limit
+      in: query
+      schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+
+  # ─── Reusable Responses ─────────────────────────
+  responses:
+    Unauthorized:
+      description: Missing or invalid JWT token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    Forbidden:
+      description: Insufficient role permissions
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+
+# ─── Global Security ────────────────────────────
+security:
+  - bearerAuth: []
+
+# ═══════════════════════════════════════════════
+# PATHS
+# ═══════════════════════════════════════════════
+paths:
+
+  # ─── AUTH ────────────────────────────────────────
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthTokens' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with email and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthTokens' }
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200':
+          description: New tokens issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthTokens' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout and invalidate refresh token
+      responses:
+        '204': { description: Logged out }
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request password reset email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '204': { description: Reset email sent (if account exists) }
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password using token from email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token:    { type: string }
+                password: { type: string, minLength: 8 }
+      responses:
+        '204': { description: Password reset successful }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ─── USERS ───────────────────────────────────────
+
+  /users:
+    get:
+      tags: [Users]
+      summary: List users in the laboratory
+      x-roles: [admin, lab_manager]
+      parameters:
+        - { $ref: '#/components/parameters/PageParam' }
+        - { $ref: '#/components/parameters/LimitParam' }
+        - name: role
+          in: query
+          schema: { $ref: '#/components/schemas/UserRole' }
+        - name: isActive
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Paginated list of users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationMeta'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [Users]
+      summary: Create a new user
+      x-roles: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUserDto' }
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+
+    get:
+      tags: [Users]
+      summary: Get user by ID
+      x-roles: [admin, lab_manager]
+      responses:
+        '200':
+          description: User details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    patch:
+      tags: [Users]
+      summary: Update user
+      x-roles: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateUserDto' }
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    delete:
+      tags: [Users]
+      summary: Deactivate user (soft delete)
+      x-roles: [admin]
+      responses:
+        '204': { description: User deactivated }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─── LABORATORIES ────────────────────────────────
+
+  /laboratories:
+    get:
+      tags: [Laboratories]
+      summary: List laboratories
+      x-roles: [admin]
+      parameters:
+        - { $ref: '#/components/parameters/PageParam' }
+        - { $ref: '#/components/parameters/LimitParam' }
+      responses:
+        '200':
+          description: List of laboratories
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationMeta'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Laboratory' }
+
+    post:
+      tags: [Laboratories]
+      summary: Create a laboratory
+      x-roles: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateLaboratoryDto' }
+      responses:
+        '201':
+          description: Laboratory created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Laboratory' }
+
+  /laboratories/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Laboratories]
+      summary: Get laboratory by ID
+      responses:
+        '200':
+          description: Laboratory details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Laboratory' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Laboratories]
+      summary: Update laboratory
+      x-roles: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateLaboratoryDto' }
+      responses:
+        '200':
+          description: Updated laboratory
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Laboratory' }
+
+  # ─── CLIENTS ─────────────────────────────────────
+
+  /clients:
+    get:
+      tags: [Clients]
+      summary: List clients
+      x-roles: [admin, lab_manager, analyst, viewer]
+      parameters:
+        - { $ref: '#/components/parameters/PageParam' }
+        - { $ref: '#/components/parameters/LimitParam' }
+        - name: search
+          in: query
+          schema: { type: string }
+          description: Fuzzy search by name or document
+      responses:
+        '200':
+          description: Paginated list of clients
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationMeta'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Client' }
+
+    post:
+      tags: [Clients]
+      summary: Create a client
+      x-roles: [admin, lab_manager]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateClientDto' }
+      responses:
+        '201':
+          description: Client created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Client' }
+
+  /clients/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Clients]
+      summary: Get client by ID
+      responses:
+        '200':
+          description: Client details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Client' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Clients]
+      summary: Update client
+      x-roles: [admin, lab_manager]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateClientDto' }
+      responses:
+        '200':
+          description: Updated client
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Client' }
+    delete:
+      tags: [Clients]
+      summary: Delete client
+      x-roles: [admin]
+      responses:
+        '204': { description: Client deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─── PRODUCTS ────────────────────────────────────
+
+  /products:
+    get:
+      tags: [Products]
+      summary: List products
+      parameters:
+        - { $ref: '#/components/parameters/PageParam' }
+        - { $ref: '#/components/parameters/LimitParam' }
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: category
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated list of products
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationMeta'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Product' }
+
+    post:
+      tags: [Products]
+      summary: Create a product
+      x-roles: [admin, lab_manager]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateProductDto' }
+      responses:
+        '201':
+          description: Product created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+
+  /products/scan:
+    post:
+      tags: [Products]
+      summary: Look up product by QR code or barcode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScanRequest' }
+      responses:
+        '200':
+          description: Product found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /products/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Products]
+      summary: Get product by ID
+      responses:
+        '200':
+          description: Product details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Products]
+      summary: Update product
+      x-roles: [admin, lab_manager]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateProductDto' }
+      responses:
+        '200':
+          description: Updated product
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+    delete:
+      tags: [Products]
+      summary: Delete product
+      x-roles: [admin]
+      responses:
+        '204': { description: Product deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─── SAMPLES ─────────────────────────────────────
+
+  /samples:
+    get:
+      tags: [Samples]
+      summary: List samples
+      parameters:
+        - { $ref: '#/components/parameters/PageParam' }
+        - { $ref: '#/components/parameters/LimitParam' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/SampleStatus' }
+        - name: clientId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: search
+          in: query
+          schema: { type: string }
+          description: Search by sample code
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Paginated list of samples
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationMeta'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Sample' }
+
+    post:
+      tags: [Samples]
+      summary: Register a new sample
+      x-roles: [admin, lab_manager, analyst]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSampleDto' }
+      responses:
+        '201':
+          description: Sample registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sample' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409':
+          description: Sample code already exists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+
+  /samples/scan:
+    post:
+      tags: [Samples]
+      summary: Look up sample by QR code or barcode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScanRequest' }
+      responses:
+        '200':
+          description: Sample found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sample' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /samples/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Samples]
+      summary: Get sample by ID
+      responses:
+        '200':
+          description: Sample details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sample' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Samples]
+      summary: Update sample metadata
+      x-roles: [admin, lab_manager, analyst]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSampleDto' }
+      responses:
+        '200':
+          description: Updated sample
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sample' }
+
+  /samples/{id}/status:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Samples]
+      summary: Transition sample status (workflow engine)
+      x-roles: [admin, lab_manager, analyst]
+      description: |
+        **Valid transitions:**
+        - `received` → `in_analysis` (analyst+)
+        - `in_analysis` → `pending_review` (analyst+)
+        - `pending_review` → `approved` (lab_manager+)
+        - `pending_review` → `rejected` (lab_manager+)
+        - `approved` → `archived` (lab_manager+)
+        - `rejected` → `archived` (lab_manager+)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateSampleStatusDto' }
+      responses:
+        '200':
+          description: Sample status updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sample' }
+        '400':
+          description: Invalid status transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /samples/{id}/history:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Samples]
+      summary: Get full audit history for a sample
+      responses:
+        '200':
+          description: Sample history entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SampleHistoryEntry' }
+
+  # ─── ANALYSES ────────────────────────────────────
+
+  /analyses:
+    get:
+      tags: [Analyses]
+      summary: List analyses
+      parameters:
+        - { $ref: '#/components/parameters/PageParam' }
+        - { $ref: '#/components/parameters/LimitParam' }
+        - name: sampleId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/AnalysisStatus' }
+      responses:
+        '200':
+          description: Paginated list of analyses
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationMeta'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Analysis' }
+
+    post:
+      tags: [Analyses]
+      summary: Create an analysis
+      x-roles: [admin, lab_manager, analyst]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAnalysisDto' }
+      responses:
+        '201':
+          description: Analysis created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Analysis' }
+
+  /analyses/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Analyses]
+      summary: Get analysis by ID
+      responses:
+        '200':
+          description: Analysis details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Analysis' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Analyses]
+      summary: Update analysis
+      x-roles: [admin, lab_manager, analyst]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateAnalysisDto' }
+      responses:
+        '200':
+          description: Updated analysis
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Analysis' }
+
+  /analyses/{id}/validate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Analyses]
+      summary: Validate a completed analysis
+      x-roles: [admin, lab_manager]
+      responses:
+        '200':
+          description: Analysis validated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Analysis' }
+        '400':
+          description: Analysis not in completed state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+
+  # ─── IMAGES ──────────────────────────────────────
+
+  /images/upload:
+    post:
+      tags: [Images]
+      summary: Upload an image (multipart/form-data)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, entityType, entityId]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Image file (max 10MB, jpeg/png/webp)
+                entityType:
+                  type: string
+                  enum: [sample, product, analysis]
+                entityId:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Image uploaded to Cloudflare R2
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadImageResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+
+  /images/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Images]
+      summary: Get image metadata
+      responses:
+        '200':
+          description: Image metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Image' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Images]
+      summary: Delete image
+      x-roles: [admin, lab_manager]
+      responses:
+        '204': { description: Image deleted from R2 and database }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /images/{id}/ocr:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Images]
+      summary: Trigger OCR on an image (Google Vision API)
+      responses:
+        '200':
+          description: OCR result — stored in images.ocr_data
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OcrResult' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /images/{id}/ai-identify:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Images]
+      summary: Trigger AI visual identification on an image
+      responses:
+        '200':
+          description: AI identification result — stored in images.ai_labels
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AiIdentifyResult' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─── REPORTS ─────────────────────────────────────
+
+  /reports:
+    get:
+      tags: [Reports]
+      summary: List generated reports
+      parameters:
+        - { $ref: '#/components/parameters/PageParam' }
+        - { $ref: '#/components/parameters/LimitParam' }
+        - name: sampleId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: format
+          in: query
+          schema: { $ref: '#/components/schemas/ReportFormat' }
+      responses:
+        '200':
+          description: Paginated list of reports
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationMeta'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Report' }
+
+  /reports/generate:
+    post:
+      tags: [Reports]
+      summary: Generate a PDF or Excel report for a sample
+      x-roles: [admin, lab_manager]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenerateReportDto' }
+      responses:
+        '202':
+          description: Report generation queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+
+  /reports/{id}/download:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Reports]
+      summary: Download a generated report
+      responses:
+        '302':
+          description: Redirect to signed R2 download URL
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─── NOTIFICATIONS ───────────────────────────────
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications
+      x-roles: [admin, lab_manager]
+      parameters:
+        - { $ref: '#/components/parameters/PageParam' }
+        - { $ref: '#/components/parameters/LimitParam' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/NotificationStatus' }
+        - name: channel
+          in: query
+          schema: { $ref: '#/components/schemas/NotificationChannel' }
+      responses:
+        '200':
+          description: Paginated list of notifications
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationMeta'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Notification' }
+
+  /notifications/send:
+    post:
+      tags: [Notifications]
+      summary: Send a notification manually
+      x-roles: [admin, lab_manager]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendNotificationDto' }
+      responses:
+        '202':
+          description: Notification queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Notification' }
+
+  /notifications/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Notifications]
+      summary: Get notification by ID
+      responses:
+        '200':
+          description: Notification details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Notification' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─── AI SERVICE (FastAPI) ────────────────────────
+
+  /ai/identify:
+    post:
+      tags: [AI]
+      summary: Identify product from image
+      servers:
+        - url: http://localhost/ai
+        - url: https://ai.tracelab.app
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: AI identification result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AiIdentifyResult' }
+
+  /ai/ocr:
+    post:
+      tags: [AI]
+      summary: Extract text from image using Google Vision API
+      servers:
+        - url: http://localhost/ai
+        - url: https://ai.tracelab.app
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: OCR text extraction result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OcrResult' }
+
+  /ai/detect-fault:
+    post:
+      tags: [AI]
+      summary: Detect defects in a product image
+      servers:
+        - url: http://localhost/ai
+        - url: https://ai.tracelab.app
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Fault detection result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FaultDetectionResult' }
+
+  /ai/suggest-classification:
+    post:
+      tags: [AI]
+      summary: Suggest product category from metadata
+      servers:
+        - url: http://localhost/ai
+        - url: https://ai.tracelab.app
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:        { type: string }
+                description: { type: string }
+                ocrText:     { type: string }
+                aiLabels:    { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: Suggested classification
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  category:   { type: string }
+                  confidence: { type: number, format: float }
+                  alternatives:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        category:   { type: string }
+                        confidence: { type: number }

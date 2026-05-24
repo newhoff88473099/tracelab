@@ -1,0 +1,166 @@
+version: '3.9'
+
+# ─── Networks ────────────────────────────────────
+networks:
+  tracelab-net:
+    driver: bridge
+
+# ─── Volumes ─────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ─── Services ────────────────────────────────────
+services:
+
+  # ── PostgreSQL ──────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: tracelab_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tracelab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tracelab_dev_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-tracelab}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tracelab} -d ${POSTGRES_DB:-tracelab}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - tracelab-net
+
+  # ── Redis ───────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: tracelab_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tracelab-net
+
+  # ── NestJS API ─────────────────────────────────
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: dev
+    container_name: tracelab_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tracelab}:${POSTGRES_PASSWORD:-tracelab_dev_pass}@postgres:5432/${POSTGRES_DB:-tracelab}
+      REDIS_URL: redis://redis:6379
+      AI_SERVICE_URL: http://ai:8000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/api:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - tracelab-net
+
+  # ── FastAPI AI Service ─────────────────────────
+  ai:
+    build:
+      context: ./apps/ai
+      dockerfile: Dockerfile
+      target: dev
+    container_name: tracelab_ai
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/ai:/app
+      - ./secrets:/secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - tracelab-net
+
+  # ── React Dashboard ────────────────────────────
+  dashboard:
+    build:
+      context: ./apps/dashboard
+      dockerfile: Dockerfile
+      target: dev
+    container_name: tracelab_dashboard
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./apps/dashboard:/app
+      - /app/node_modules
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - tracelab-net
+
+  # ── NGINX Reverse Proxy ────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: tracelab_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx/dev.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+      - ai
+      - dashboard
+    networks:
+      - tracelab-net
+
+  # ── Adminer (DB GUI — dev only) ────────────────
+  adminer:
+    image: adminer:4
+    container_name: tracelab_adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    profiles:
+      - tools
+    networks:
+      - tracelab-net

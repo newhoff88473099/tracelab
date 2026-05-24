@@ -1,0 +1,29 @@
+name: API Contract CI
+
+on:
+  push:
+    branches: [ main, staging, develop ]
+    paths:
+      - 'docs/api/openapi.yaml'
+      - '.github/workflows/api.yml'
+      - '.spectral.yaml'
+  pull_request:
+    branches: [ main, staging, develop ]
+    paths:
+      - 'docs/api/openapi.yaml'
+      - '.github/workflows/api.yml'
+      - '.spectral.yaml'
+
+jobs:
+  lint-openapi:
+    name: Lint OpenAPI Spec
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run Spectral Lint
+        uses: stoplightio/spectral-action@v0.8.2
+        with:
+          file_glob: 'docs/api/openapi.yaml'
+          spectral_ruleset: '.spectral.yaml'
